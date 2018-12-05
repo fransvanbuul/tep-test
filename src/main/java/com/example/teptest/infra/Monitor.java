@@ -6,11 +6,11 @@ import org.axonframework.config.EventProcessingConfiguration;
 import org.axonframework.eventhandling.EventProcessor;
 import org.axonframework.eventhandling.EventTrackerStatus;
 import org.axonframework.eventhandling.TrackingEventProcessor;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Map;
@@ -23,9 +23,9 @@ import java.util.concurrent.CopyOnWriteArraySet;
 @RequiredArgsConstructor
 public class Monitor {
 
+    private final DataSource dataSource;
     private final EventProcessingConfiguration eventProcessingConfiguration;
     private final Set<String> ignoredProcessors = new CopyOnWriteArraySet<>();
-    private final JdbcTemplate jdbcTemplate;
 
     @Scheduled(fixedRate=5000)
     public void on() {
@@ -36,14 +36,18 @@ public class Monitor {
 
     private void logEventTable() {
         if (log.isDebugEnabled()) {
-            String sql = "SELECT COUNT(*), MAX(globalindex) FROM domainevententry";
-            jdbcTemplate.query(sql, new RowMapper<Object>() {
-                @Override
-                public Object mapRow(ResultSet rs, int rowNum) throws SQLException {
-                    log.debug("event count {}, max global index {}", rs.getInt(1), rs.getInt(2));
-                    return null;
+            try(Connection connection = dataSource.getConnection()) {
+                String sql = "SELECT COUNT(*), MAX(globalindex) FROM domainevententry";
+                try(ResultSet rs = connection.prepareStatement(sql).executeQuery()) {
+                    if(rs.next()) {
+                        log.debug("event count {}, max global index {}", rs.getInt(1), rs.getInt(2));
+                    } else {
+                        log.error("no data");
+                    }
                 }
-            });
+            } catch(SQLException ex) {
+                log.error("SQLException", ex);
+            }
         }
     }
 
